@@ -14,9 +14,21 @@ User → Jump VM (VNet) → Foundry Agent (cloud, Assistants API)
          └── DateTime MCP Server (Container App, VNet-internal only)
                               ↓
        Jump VM → submits tool outputs → Agent responds
+
+User → M365 (Teams/Outlook) → Agent Webapp (Container App, external)
+                                     ↓ POST /api/messages
+                              Foundry Agent (Assistants API)
+                                     ↓ requires_action
+                              Agent Webapp calls tools:
+                                ├── Weather Function (via VNet)
+                                └── MCP Server (via VNet, internal CAE DNS)
+                                     ↓
+                              Agent Webapp → Bot Connector → M365 reply
 ```
 
-**Key pattern**: Tools are `function` type (client-executed), NOT `azure_function`. The client (on the jump VM) handles HTTP calls to both backends. This avoids the Enterprise Standard tier requirement for `azure_function` tools.
+**Two access patterns**:
+1. **Jump VM** (original): Direct CLI interaction via `foundry_agent.py`
+2. **M365 via A365** (new): Bot Framework Activities → Agent Webapp Container App → Foundry Agent → Tool calls → Response via Bot Connector
 
 ### Network Topology
 
@@ -27,17 +39,19 @@ User → Jump VM (VNet) → Foundry Agent (cloud, Assistants API)
 | mcp-subnet | 10.0.2.0/24 | MCP Container App Environment | Microsoft.App/environments |
 | func-integration-subnet | 10.0.3.0/24 | Function App VNet Integration | Microsoft.Web/serverFarms |
 | jumpbox-subnet | 10.0.4.0/24 | Jump VM for testing | None |
+| agent-app-subnet | 10.0.6.0/23 | Agent Webapp Container App (external) | Microsoft.App/environments |
 
-### Resources Created (~45+)
+### Resources Created (~55+)
 
-- VNet with 5 subnets
+- VNet with 6 subnets
 - AI Services account (S0, disableLocalAuth=true)
 - AI Foundry project with 3 connections (AI Search, Cosmos DB, Storage)
 - Cosmos DB (private), Storage Account (private), AI Search (free tier, public)
 - 9 Private Endpoints with 7 Private DNS Zones
 - Azure Function (Flex Consumption, Python 3.11) with EasyAuth + VNet Integration + PE
 - Container App Environment (internal) + Container App (MCP server)
-- ACR (Basic) for MCP Docker image
+- Container App Environment (external) + Container App (Agent Webapp for A365)
+- ACR (Basic) for MCP and Agent Webapp Docker images
 - Jump VM (Ubuntu 24.04, Standard_B1s) with public IP
 - gpt-4.1-mini model deployment
 - Tool queue storage account with weather-input/weather-output queues
@@ -124,6 +138,17 @@ hybrid-network/
 │   ├── foundry_agent.py
 │   ├── test_agent.py
 │   └── smoke_test.py
+├── agent-webapp/
+│   ├── app.py                    # FastAPI web service (/api/messages, /healthz)
+│   ├── bot.py                    # Foundry Assistants API handler
+│   ├── tools.py                  # Weather Function & MCP Server tool calls
+│   ├── config.py                 # Environment-based configuration
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   ├── test_app.py               # 14 unit tests
+│   └── manifest/
+│       ├── manifest.json         # Teams app manifest (devPreview)
+│       └── a365.config.json      # A365 self-hosted config
 ├── azure-function-server/
 │   ├── function_app.py
 │   ├── host.json
@@ -136,7 +161,10 @@ hybrid-network/
 │   ├── Dockerfile
 │   └── test_server.py
 ├── scripts/
-│   └── create_or_update_agent.ps1
+│   ├── create_or_update_agent.ps1
+│   ├── setup-a365-permissions.ps1
+│   ├── deploy-agent-webapp.ps1
+│   └── add-vnet-integration.ps1
 └── infra-terraform/
     ├── main.tf
     ├── variables.tf
@@ -151,6 +179,7 @@ hybrid-network/
         ├── private-endpoints/
         ├── weather-function/
         ├── datetime-mcp/
+        ├── agent-webapp/
         ├── jump-vm/
         └── foundry-agent/
 ```
@@ -690,9 +719,10 @@ EOF
 ```powershell
 # From project root with .venv activated
 python -m pytest azure-function-server/test_function_app.py -v   # 13 tests
-python -m pytest mcp-server/test_server.py -v                     # 19 tests  (requires: pip install pytest)
-python -m pytest ai-agent/test_agent.py -v                        # 16 tests  (requires mocking)
-# Total: 48 unit tests
+python -m pytest mcp-server/test_server.py -v                     # 21 tests
+python -m pytest ai-agent/test_agent.py -v                        # 19 tests
+python -m pytest agent-webapp/test_app.py -v                      # 14 tests
+# Total: 67 unit tests
 ```
 
 ### Verify Weather Function (Public Endpoint)
@@ -809,6 +839,115 @@ nslookup <cosmos>.documents.azure.com
 
 ---
 
+## Step 12: Deploy Agent Webapp (A365 Container App)
+
+The agent webapp is a FastAPI web service that receives Bot Framework Activities on `/api/messages`, processes them through the Foundry Assistants API, and sends replies via the Bot Connector REST API. It runs on an external Container App Environment (internet-accessible) but is VNet-integrated for connectivity to internal backends.
+
+### Deploy Infrastructure
+
+```powershell
+# Add to terraform.tfvars:
+# foundry_agent_id = "asst_fAVIpp16oVnfHaBuCo1BtvJ9"
+# bot_app_id       = ""   # Set after a365 setup
+# bot_app_secret   = ""   # Set after a365 setup
+
+cd infra-terraform
+terraform plan -target=module.network -target=module.agent_webapp
+terraform apply -target=module.network -target=module.agent_webapp
+```
+
+### Build and Push Container
+
+```powershell
+.\scripts\deploy-agent-webapp.ps1
+```
+
+Or manually:
+
+```powershell
+$ACR = terraform -chdir=infra-terraform output -raw datetime_mcp_acr_name
+az acr login --name $ACR
+docker build -t "$ACR.azurecr.io/agent-webapp:latest" agent-webapp/
+docker push "$ACR.azurecr.io/agent-webapp:latest"
+```
+
+### Verify
+
+```powershell
+$FQDN = terraform -chdir=infra-terraform output -raw agent_webapp_fqdn
+curl "https://$FQDN/healthz"
+# Should return: {"status":"ok","agent":"pce","framework":"a365"}
+```
+
+---
+
+## Step 13: Setup A365 Permissions & Graph API
+
+### Add Graph Permissions
+
+```powershell
+.\scripts\setup-a365-permissions.ps1
+```
+
+This adds Application.ReadWrite.All, DelegatedPermissionGrant.ReadWrite.All, Directory.Read.All, and User.ReadWrite.All to the service principal and grants admin consent.
+
+### Install A365 CLI
+
+```powershell
+dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli --prerelease
+```
+
+### Login and Setup
+
+```powershell
+a365 auth login --tenant-id <your-tenant-id>
+a365 setup --config-file agent-webapp/manifest/a365.config.json
+```
+
+After setup, note the Bot App ID and Secret, then update `terraform.tfvars`:
+
+```hcl
+bot_app_id     = "<from-a365-setup>"
+bot_app_secret = "<from-a365-setup>"
+```
+
+Redeploy the Container App to apply the new env vars:
+
+```powershell
+terraform apply -target=module.agent_webapp
+```
+
+---
+
+## Step 14: Publish to M365 (Teams)
+
+### Configure Teams Developer Portal
+
+1. Go to [Teams Developer Portal](https://dev.teams.microsoft.com/apps)
+2. Import the manifest from `agent-webapp/manifest/manifest.json` (replace `{{BOT_APP_ID}}` with your actual Bot App ID)
+3. Under **App features** → **Bot**, set:
+   - **Agent Type**: API Based
+   - **Notification URL**: `https://<agent-webapp-fqdn>/api/messages`
+4. Under **Publish** → **Publish to your org** or install for personal use
+
+### VNet Integration for A365-Created App Service
+
+If you used `needDeployment: true` in a365.config.json and A365 created its own App Service:
+
+```powershell
+.\scripts\add-vnet-integration.ps1 -AppServiceName "<a365-app-name>"
+```
+
+This adds VNet Integration so the App Service can reach the internal MCP server and private endpoints.
+
+### Test in Teams
+
+1. Search for "PCE Agent" in the Teams app catalog
+2. Start a personal chat with the agent
+3. Try: "What's the weather in Seattle?" or "What time is it in Tokyo?"
+
+---
+
 ## Cleanup
 
 ```powershell
@@ -836,3 +975,7 @@ az ad app delete --id <your-sp-client-id>
 11. **Managed identity for Foundry project**: Must be granted access (e.g. Website Contributor) on the Function App for the agent runtime to invoke tools over the VNet
 12. **Function App MI → Storage**: Beyond the 4 Terraform-managed roles on the function's runtime storage, you may need `Storage Blob Data Contributor` on the shared project storage account
 13. **Service Principal via Portal**: When creating the app registration in Entra ID, remember to set Application ID URI and expose a scope (e.g. `Files.Read`) under "Expose an API" — this is needed for EasyAuth token audiences
+14. **A365 self-hosted mode**: Use `needDeployment: false` when deploying your own Container App. The `messagingEndpoint` points to the Container App's public FQDN
+15. **External CAE + VNet**: An external Container App Environment (internal_load_balancer_enabled=false) on a VNet subnet provides internet accessibility while maintaining VNet connectivity to internal resources
+16. **Bot Framework Activities**: M365 sends Activities to `/api/messages`. The agent processes them and replies via the Bot Connector REST API at the `serviceUrl` provided in the activity
+17. **Separate CAE for external access**: The MCP server's internal CAE must remain internal. Deploy the agent webapp on a separate external CAE on its own subnet (/23 for Container Apps)

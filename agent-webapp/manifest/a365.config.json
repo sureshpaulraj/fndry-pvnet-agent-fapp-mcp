@@ -1,0 +1,10 @@
+{
+    "name": "pce-agent",
+    "description": "PCE Agent — Weather and DateTime powered by Azure Foundry",
+    "needDeployment": false,
+    "messagingEndpoint": "{{MESSAGING_ENDPOINT}}",
+    "settings": {
+        "appId": "{{BOT_APP_ID}}",
+        "tenantId": "{{AZURE_TENANT_ID}}"
+    }
+}

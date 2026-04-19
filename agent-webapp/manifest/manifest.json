@@ -1,0 +1,63 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+    "manifestVersion": "devPreview",
+    "version": "1.0.0",
+    "id": "{{BOT_APP_ID}}",
+    "developer": {
+        "name": "Contoso",
+        "websiteUrl": "https://example.com",
+        "privacyUrl": "https://example.com/privacy",
+        "termsOfUseUrl": "https://example.com/terms"
+    },
+    "name": {
+        "short": "PCE Agent",
+        "full": "PCE Agent — Weather & DateTime"
+    },
+    "description": {
+        "short": "Weather and DateTime agent powered by Azure Foundry",
+        "full": "An AI agent that provides weather information and date/time queries, backed by Azure Foundry, VNet-integrated backends, and MCP server connectivity."
+    },
+    "icons": {
+        "color": "color.png",
+        "outline": "outline.png"
+    },
+    "accentColor": "#0078D4",
+    "bots": [
+        {
+            "botId": "{{BOT_APP_ID}}",
+            "scopes": [
+                "personal",
+                "team",
+                "groupChat"
+            ],
+            "supportsFiles": false,
+            "isNotificationOnly": false,
+            "commandLists": [
+                {
+                    "scopes": [
+                        "personal"
+                    ],
+                    "commands": [
+                        {
+                            "title": "weather",
+                            "description": "Get current weather for a city"
+                        },
+                        {
+                            "title": "forecast",
+                            "description": "Get weather forecast for a city"
+                        },
+                        {
+                            "title": "time",
+                            "description": "Get current time in a timezone"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "permissions": [
+        "identity",
+        "messageTeamMembers"
+    ],
+    "validDomains": []
+}

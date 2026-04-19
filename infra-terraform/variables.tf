@@ -164,3 +164,29 @@ variable "foundry_model_capacity" {
   type        = number
   default     = 30
 }
+
+# ─── Agent Webapp (A365) ─────────────────────────────────────────────────────
+variable "foundry_agent_id" {
+  description = "Foundry Agent ID (from create_or_update_agent.ps1)"
+  type        = string
+  default     = ""
+}
+
+variable "bot_app_id" {
+  description = "A365 Blueprint App ID (set after a365 setup)"
+  type        = string
+  default     = ""
+}
+
+variable "bot_app_secret" {
+  description = "A365 Blueprint App secret (set after a365 setup)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "agent_app_subnet_name" {
+  description = "Agent webapp Container Apps subnet name"
+  type        = string
+  default     = "agent-app-subnet"
+}

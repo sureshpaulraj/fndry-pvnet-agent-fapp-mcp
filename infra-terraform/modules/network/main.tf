@@ -1,9 +1,11 @@
 # ─── Network Module ──────────────────────────────────────────────────────────
-# VNet with 4 subnets:
-#   agent-subnet  (10.0.0.0/24) — delegated to Microsoft.App/environments
-#   pe-subnet     (10.0.1.0/24) — private endpoints
-#   mcp-subnet    (10.0.2.0/24) — delegated to Microsoft.App/environments
-#   func-integration-subnet (10.0.3.0/24) — delegated to Microsoft.Web/serverFarms
+# VNet with 6 subnets:
+#   agent-subnet           (10.0.0.0/24) — delegated to Microsoft.App/environments
+#   pe-subnet              (10.0.1.0/24) — private endpoints
+#   mcp-subnet             (10.0.2.0/24) — delegated to Microsoft.App/environments
+#   func-integration-subnet(10.0.3.0/24) — delegated to Microsoft.Web/serverFarms
+#   jumpbox-subnet         (10.0.4.0/24) — no delegation
+#   agent-app-subnet       (10.0.5.0/23) — delegated to Microsoft.App/environments (external)
 
 variable "location" {
   type = string
@@ -31,6 +33,11 @@ variable "mcp_subnet_name" {
 variable "func_integration_subnet_name" {
   type    = string
   default = "func-integration-subnet"
+}
+
+variable "agent_app_subnet_name" {
+  type    = string
+  default = "agent-app-subnet"
 }
 
 variable "resource_group_name" {
@@ -110,6 +117,23 @@ resource "azurerm_subnet" "jumpbox" {
   address_prefixes     = ["10.0.4.0/24"]
 }
 
+resource "azurerm_subnet" "agent_app" {
+  name                 = var.agent_app_subnet_name
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.6.0/23"]
+
+  delegation {
+    name = "Microsoft-App-environments"
+    service_delegation {
+      name = "Microsoft.App/environments"
+      actions = [
+        "Microsoft.Network/virtualNetworks/subnets/join/action",
+      ]
+    }
+  }
+}
+
 # ─── Outputs ─────────────────────────────────────────────────────────────────
 output "vnet_name" {
   value = azurerm_virtual_network.main.name
@@ -137,4 +161,8 @@ output "func_integration_subnet_id" {
 
 output "jumpbox_subnet_id" {
   value = azurerm_subnet.jumpbox.id
+}
+
+output "agent_app_subnet_id" {
+  value = azurerm_subnet.agent_app.id
 }

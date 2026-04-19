@@ -67,3 +67,20 @@ output "weather_input_queue" {
 output "weather_output_queue" {
   value = module.foundry_agent.weather_output_queue_name
 }
+
+# ─── Agent Webapp ────────────────────────────────────────────────────────────
+output "agent_webapp_url" {
+  value = module.agent_webapp.agent_app_url
+}
+
+output "agent_webapp_fqdn" {
+  value = module.agent_webapp.agent_app_fqdn
+}
+
+output "agent_webapp_messaging_endpoint" {
+  value = module.agent_webapp.messaging_endpoint
+}
+
+output "agent_webapp_principal_id" {
+  value = module.agent_webapp.agent_app_principal_id
+}
