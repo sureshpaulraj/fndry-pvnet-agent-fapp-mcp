@@ -41,11 +41,13 @@ class TestCallWeatherFunction(unittest.TestCase):
         result = agent.call_weather_function("weather", {"city": "Seattle"})
         data = json.loads(result)
         self.assertEqual(data["city"], "Seattle")
-        mock_get.assert_called_once_with(
-            "https://weather.test/api/weather",
-            params={"city": "Seattle"},
-            timeout=15,
-        )
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args
+        self.assertEqual(call_kwargs.args[0], "https://weather.test/api/weather")
+        self.assertEqual(call_kwargs.kwargs["params"], {"city": "Seattle"})
+        self.assertEqual(call_kwargs.kwargs["timeout"], 15)
+        self.assertIn("Authorization", call_kwargs.kwargs["headers"])
+        self.assertTrue(call_kwargs.kwargs["headers"]["Authorization"].startswith("Bearer "))
 
     @patch.object(agent.requests, "get")
     def test_get_weather_error(self, mock_get):
@@ -62,11 +64,12 @@ class TestCallWeatherFunction(unittest.TestCase):
         mock_get.return_value = mock_resp
 
         result = agent.call_weather_function("weather/forecast", {"city": "Tokyo", "days": 5})
-        mock_get.assert_called_once_with(
-            "https://weather.test/api/weather/forecast",
-            params={"city": "Tokyo", "days": 5},
-            timeout=15,
-        )
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args
+        self.assertEqual(call_kwargs.args[0], "https://weather.test/api/weather/forecast")
+        self.assertEqual(call_kwargs.kwargs["params"], {"city": "Tokyo", "days": 5})
+        self.assertEqual(call_kwargs.kwargs["timeout"], 15)
+        self.assertIn("Authorization", call_kwargs.kwargs["headers"])
 
 
 class TestCallMCPTool(unittest.TestCase):
