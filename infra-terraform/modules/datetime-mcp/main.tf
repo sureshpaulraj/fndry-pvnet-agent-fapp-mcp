@@ -45,6 +45,10 @@ resource "azurerm_container_app_environment" "mcp" {
   resource_group_name            = var.resource_group_name
   infrastructure_subnet_id       = var.mcp_subnet_id
   internal_load_balancer_enabled = true
+
+  lifecycle {
+    ignore_changes = [infrastructure_resource_group_name]
+  }
 }
 
 # ─── DateTime MCP Container App ─────────────────────────────────────────────

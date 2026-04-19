@@ -20,6 +20,10 @@ infra-terraform/tfplan
 infra-terraform/terraform.tfvars
 infra-terraform/.terraform.lock.hcl
 
+# ─── A365 CLI ────────────────────────────────────────────────────────────────
+a365.generated.config.json
+*.zip
+
 # ─── Secrets & Environment ───────────────────────────────────────────────────
 .env
 *.pem

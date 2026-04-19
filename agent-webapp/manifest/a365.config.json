@@ -1,10 +1,15 @@
 {
     "name": "pce-agent",
     "description": "PCE Agent — Weather and DateTime powered by Azure Foundry",
+    "tenantId": "5d0245d3-4d99-44f5-82d3-28c83aeda726",
+    "subscriptionId": "2588d490-7849-4b98-9b57-8309b012872b",
+    "location": "eastus2",
+    "agentBlueprintDisplayName": "PCE Agent",
     "needDeployment": false,
-    "messagingEndpoint": "{{MESSAGING_ENDPOINT}}",
+    "messagingEndpoint": "https://agentappk71j-app.victoriousgrass-85f109ea.eastus2.azurecontainerapps.io/api/messages",
+    "clientAppId": "dfe36927-3171-4c66-8370-26840f0ab080",
     "settings": {
-        "appId": "{{BOT_APP_ID}}",
-        "tenantId": "{{AZURE_TENANT_ID}}"
+        "appId": "dfe36927-3171-4c66-8370-26840f0ab080",
+        "tenantId": "5d0245d3-4d99-44f5-82d3-28c83aeda726"
     }
 }
