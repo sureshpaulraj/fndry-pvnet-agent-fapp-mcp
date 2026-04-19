@@ -1,0 +1,171 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Weather API (Azure Function Behind VNet)",
+    "description": "A weather service running as an Azure Function with VNet Integration. Provides current weather and forecasts for cities. Deployed behind a VNet for agent tool access via DataProxy.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://localhost:7071",
+      "description": "Local development"
+    }
+  ],
+  "paths": {
+    "/api/weather": {
+      "get": {
+        "operationId": "getWeather",
+        "summary": "Get current weather for a city",
+        "description": "Returns the current temperature, condition, humidity, and wind speed for the specified city.",
+        "parameters": [
+          {
+            "name": "city",
+            "in": "query",
+            "description": "City name to get weather for",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "Seattle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current weather data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/weather/forecast": {
+      "get": {
+        "operationId": "getWeatherForecast",
+        "summary": "Get multi-day weather forecast",
+        "description": "Returns a multi-day weather forecast for the specified city.",
+        "parameters": [
+          {
+            "name": "city",
+            "in": "query",
+            "description": "City name",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "Seattle"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "description": "Number of forecast days (max 7)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Weather forecast",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForecastResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/healthz": {
+      "get": {
+        "operationId": "healthCheck",
+        "summary": "Health check",
+        "description": "Returns the health status of the weather service.",
+        "responses": {
+          "200": {
+            "description": "Service health status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WeatherResponse": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "ISO 8601 timestamp"
+          },
+          "temperature": {
+            "type": "object",
+            "properties": {
+              "celsius": { "type": "number" },
+              "fahrenheit": { "type": "number" }
+            }
+          },
+          "condition": {
+            "type": "string",
+            "description": "Weather condition (Sunny, Cloudy, Rainy, etc.)"
+          },
+          "humidity_percent": {
+            "type": "integer",
+            "description": "Relative humidity percentage"
+          },
+          "wind_speed_kmh": {
+            "type": "number",
+            "description": "Wind speed in km/h"
+          }
+        }
+      },
+      "ForecastResponse": {
+        "type": "object",
+        "properties": {
+          "city": { "type": "string" },
+          "forecast": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": { "type": "string" },
+                "high_celsius": { "type": "number" },
+                "low_celsius": { "type": "number" },
+                "high_fahrenheit": { "type": "number" },
+                "low_fahrenheit": { "type": "number" },
+                "condition": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "service": { "type": "string" },
+          "timestamp": { "type": "string" }
+        }
+      }
+    }
+  }
+}

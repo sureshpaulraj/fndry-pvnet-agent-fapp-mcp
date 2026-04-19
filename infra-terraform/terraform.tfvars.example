@@ -1,0 +1,26 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# Do NOT commit terraform.tfvars — it contains sensitive identifiers.
+
+subscription_id = "<your-subscription-id>"
+tenant_id       = "<your-tenant-id>"
+
+# Service Principal auth (secret via TF_VAR_client_secret env var)
+client_id = "<your-sp-client-id>"
+
+resource_group_name = "rg-hybrid-agent"
+location            = "eastus2"
+
+# AI Services
+ai_services_name = "aiservices"
+model_name       = "gpt-4o-mini"
+model_format     = "OpenAI"
+model_version    = "2024-07-18"
+model_sku_name   = "GlobalStandard"
+model_capacity   = 30
+
+# Networking
+vnet_name                    = "agent-vnet"
+agent_subnet_name            = "agent-subnet"
+pe_subnet_name               = "pe-subnet"
+mcp_subnet_name              = "mcp-subnet"
+func_integration_subnet_name = "func-integration-subnet"

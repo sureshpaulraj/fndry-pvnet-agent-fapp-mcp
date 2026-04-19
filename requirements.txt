@@ -1,0 +1,21 @@
+# Azure Identity & Authentication
+azure-identity
+
+# Azure AI Services
+azure-ai-projects
+azure-ai-inference
+openai
+
+# Azure Functions (for local development)
+azure-functions
+
+# Azure Resource Management
+azure-mgmt-resource
+azure-mgmt-cognitiveservices
+
+# Azure Storage (managed identity access)
+azure-storage-blob
+
+# Utilities
+python-dotenv
+requests

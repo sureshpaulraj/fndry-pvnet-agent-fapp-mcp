@@ -1,0 +1,17 @@
+using './main.bicep'
+
+param location = 'eastus2'
+param aiServices = 'aiservices'
+param modelName = 'gpt-4o-mini'
+param modelFormat = 'OpenAI'
+param modelVersion = '2024-07-18'
+param modelSkuName = 'GlobalStandard'
+param modelCapacity = 30
+param firstProjectName = 'project'
+param projectDescription = 'Hybrid agent project with Weather Function and DateTime MCP Server'
+param displayName = 'hybrid-agent-project'
+param vnetName = 'agent-vnet'
+param agentSubnetName = 'agent-subnet'
+param peSubnetName = 'pe-subnet'
+param mcpSubnetName = 'mcp-subnet'
+param funcIntegrationSubnetName = 'func-integration-subnet'
