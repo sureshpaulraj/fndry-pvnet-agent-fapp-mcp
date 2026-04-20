@@ -45,7 +45,3 @@ Follow the **[Setup Guide](SETUP-GUIDE.md)** for a complete step-by-step walkthr
 ├── SETUP-GUIDE.md      # Guided setup walkthrough
 └── SKILL.md            # Technical reference
 ```
-
-## License
-
-Internal / AI Guild project.
