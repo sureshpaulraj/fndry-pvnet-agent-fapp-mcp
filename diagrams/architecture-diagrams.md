@@ -5,73 +5,73 @@
 ```mermaid
 graph TB
     subgraph Internet["Internet / Public"]
-        User["User (SSH Client)"]
-        M365["Microsoft 365<br/>Teams / Outlook"]
-        EntraID["Microsoft Entra ID<br/>Token Issuance"]
-        FoundryAPI["AI Foundry Agent API<br/>aiservicesk71j.services.ai.azure.com"]
-        WeatherFQDN["Weather Function FQDN<br/>weatherk71j-func.azurewebsites.net"]
-        BotConnector["Bot Framework Connector<br/>smba.trafficmanager.net"]
+        User["User · SSH Client"]
+        M365["M365 · Teams / Outlook"]
+        EntraID["Entra ID · Token Issuance"]
+        FoundryAPI["AI Foundry Agent API"]
+        WeatherFQDN["Weather Function FQDN"]
+        BotConnector["Bot Framework Connector"]
     end
 
-    subgraph VNet["agent-vnet (10.0.0.0/16)"]
-        subgraph AgentSubnet["agent-subnet (10.0.0.0/24)"]
-            DataProxy["AI Services<br/>Network Injection<br/>(Data Proxy)"]
+    subgraph VNet["agent-vnet · 10.0.0.0/16"]
+        subgraph AgentSubnet["agent-subnet · 10.0.0.0/24"]
+            DataProxy["AI Services Data Proxy"]
         end
 
-        subgraph PESubnet["pe-subnet (10.0.1.0/24)"]
+        subgraph PESubnet["pe-subnet · 10.0.1.0/24"]
             PE_AI["PE: AI Services"]
-            PE_Blob["PE: Blob Storage"]
+            PE_Blob["PE: Blob"]
             PE_Cosmos["PE: Cosmos DB"]
-            PE_Func["PE: Weather Function"]
-            PE_Queue["PE: Queue Storage"]
-            PE_File["PE: File Storage"]
+            PE_Func["PE: Weather Func"]
+            PE_Queue["PE: Queue"]
+            PE_File["PE: File"]
         end
 
-        subgraph MCPSubnet["mcp-subnet (10.0.2.0/24)"]
-            CAE["Container Apps Environment<br/>Internal LB: 10.0.2.160"]
-            MCPServer["DateTime MCP Server<br/>dtmcpk71j-app<br/>Streamable HTTP"]
+        subgraph MCPSubnet["mcp-subnet · 10.0.2.0/24"]
+            CAE["CAE Internal · 10.0.2.160"]
+            MCPServer["DateTime MCP Server"]
         end
 
-        subgraph FuncSubnet["func-integration-subnet (10.0.3.0/24)"]
-            FuncVNet["Weather Function<br/>VNet Integration<br/>(Outbound)"]
+        subgraph FuncSubnet["func-integration · 10.0.3.0/24"]
+            FuncVNet["Weather Func VNet Out"]
         end
 
-        subgraph JumpSubnet["jumpbox-subnet (10.0.4.0/24)"]
-            JumpVM["jumpbox-vm<br/>Ubuntu 24.04 LTS<br/>10.0.4.4<br/>foundry_agent.py"]
+        subgraph JumpSubnet["jumpbox-subnet · 10.0.4.0/24"]
+            JumpVM["jumpbox-vm · Ubuntu 24.04"]
         end
 
-        subgraph AgentAppSubnet["agent-app-subnet (10.0.6.0/23)"]
-            AgentCAE["Container Apps Environment<br/>External (internet-facing)"]
-            AgentWebapp["Agent Webapp<br/>agentappk71j-app<br/>aiohttp + Microsoft Agents SDK"]
+        subgraph AgentAppSubnet["agent-app-subnet · 10.0.6.0/23"]
+            AgentCAE["CAE External · internet-facing"]
+            AgentWebapp["Agent Webapp · Agents SDK"]
         end
     end
 
     subgraph Services["Azure PaaS Services"]
-        AISvc["AI Services Account<br/>aiservicesk71j (S0)<br/>gpt-4.1-mini"]
-        WeatherFunc["Weather Function App<br/>weatherk71j-func<br/>Flex Consumption (FC1)"]
-        ACR["ACR: acrdtmcpk71j<br/>MCP + Agent Webapp Images"]
-        Storage1["Storage: aiservicesk71jst<br/>Blob (AI data)"]
-        Storage2["Storage: weatherk71jstor<br/>Blob + Queue + File"]
-        Storage3["Storage: toolqk71jst<br/>Queue (Tool results)"]
-        CosmosDB["Cosmos DB<br/>aiservicesk71jcosmosdb<br/>Thread Storage"]
+        AISvc["AI Services · S0 · gpt-4.1-mini"]
+        WeatherFunc["Weather Function · Flex FC1"]
+        ACR["ACR: acrdtmcpk71j"]
+        Storage1["Storage: AI data blob"]
+        Storage2["Storage: blob+queue+file"]
+        Storage3["Storage: tool queues"]
+        CosmosDB["Cosmos DB · threads"]
     end
 
     subgraph Observability["Observability"]
-        AppInsights["Application Insights<br/>hybrid-agent-k71j-appinsights"]
-        LAW["Log Analytics Workspace<br/>hybrid-agent-k71j-law"]
+        AppInsights["Application Insights"]
+        LAW["Log Analytics Workspace"]
     end
 
     User -->|"SSH TCP/22"| JumpVM
-    JumpVM -->|"HTTPS + Bearer<br/>ai.azure.com scope"| FoundryAPI
+    JumpVM -->|"HTTPS + Bearer"| FoundryAPI
     JumpVM -->|"Entra Token"| EntraID
-    JumpVM -->|"HTTPS + EasyAuth Bearer"| WeatherFQDN
-    JumpVM -->|"POST /mcp<br/>VNet Internal"| MCPServer
+    JumpVM -->|"EasyAuth Bearer"| WeatherFQDN
+    JumpVM -->|"POST /mcp · VNet"| MCPServer
 
-    M365 -->|"Bot Framework<br/>Activities"| BotConnector
+    M365 -->|"Bot Activities"| BotConnector
     BotConnector -->|"POST /api/messages"| AgentWebapp
-    AgentWebapp -->|"Foundry Assistants API<br/>(Managed Identity)"| FoundryAPI
-    AgentWebapp -->|"HTTPS + MI Token<br/>EasyAuth"| WeatherFQDN
-    AgentWebapp -->|"POST /mcp<br/>VNet Internal DNS"| MCPServer
+    AgentWebapp -->|"Foundry API · MI"| FoundryAPI
+    AgentWebapp -->|"MI Token · EasyAuth"| WeatherFQDN
+    AgentWebapp -->|"POST /mcp · VNet DNS"| MCPServer
     AgentWebapp -->|"Reply Activity"| BotConnector
 
     PE_AI -.->|"Private Link"| AISvc
@@ -89,7 +89,7 @@ graph TB
     AgentWebapp -.->|"Telemetry"| AppInsights
     WeatherFunc -.->|"Telemetry"| AppInsights
     MCPServer -.->|"Telemetry"| AppInsights
-    AppInsights -.->|"Logs & Metrics"| LAW
+    AppInsights -.->|"Logs"| LAW
 
     style VNet fill:#d0ebff,stroke:#1971c2,stroke-width:3px
     style AgentSubnet fill:#d0bfff,stroke:#6741d9
@@ -109,40 +109,40 @@ graph TB
 graph TB
     subgraph ClientLayer["Client Layer"]
         SSH["SSH Client"]
-        VM["Jump VM<br/>(foundry_agent.py)"]
-        Teams["Microsoft Teams<br/>/ Outlook"]
+        VM["Jump VM · foundry_agent.py"]
+        Teams["Teams / Outlook"]
     end
 
-    subgraph M365Layer["M365 Integration Layer"]
-        BotConnector["Bot Framework<br/>Connector Service"]
-        AgentWebapp["Agent Webapp<br/>agentappk71j-app<br/>aiohttp + Microsoft Agents SDK v0.9.0"]
+    subgraph M365Layer["M365 Integration"]
+        BotConnector["Bot Framework Connector"]
+        AgentWebapp["Agent Webapp · Agents SDK v0.9"]
     end
 
-    subgraph AgentLayer["Agent Orchestration Layer"]
-        FoundryAgent["Foundry Agent 'pce'<br/>asst_fAVIpp16oVnfHaBuCo1BtvJ9"]
-        GPT["gpt-4.1-mini<br/>GlobalStandard (cap=30)"]
+    subgraph AgentLayer["Agent Orchestration"]
+        FoundryAgent["Foundry Agent 'pce'"]
+        GPT["gpt-4.1-mini · cap=30"]
     end
 
-    subgraph ToolLayer["Tool Execution Layer (6 Function Tools)"]
-        subgraph WeatherTools["Weather Tools (via Azure Function + EasyAuth)"]
-            T1["get_weather — Current weather"]
-            T2["get_forecast — Multi-day forecast"]
-            T3["get_weather_alerts — Active alerts"]
+    subgraph ToolLayer["Tool Execution · 6 Functions"]
+        subgraph WeatherTools["Weather · Azure Function + EasyAuth"]
+            T1["get_weather"]
+            T2["get_forecast"]
+            T3["get_weather_alerts"]
         end
-        subgraph DateTimeTools["DateTime Tools (via MCP Server)"]
-            T4["get_current_datetime — Current time + TZ"]
-            T5["convert_timezone — TZ conversion"]
-            T6["calculate_time_difference — Time diff"]
+        subgraph DateTimeTools["DateTime · MCP Server"]
+            T4["get_current_datetime"]
+            T5["convert_timezone"]
+            T6["calculate_time_difference"]
         end
     end
 
     subgraph BackendLayer["Backend Services"]
-        AISvc["AI Services Account<br/>S0 / Managed Identity Only"]
-        FuncApp["Weather Function App<br/>Flex Consumption FC1"]
-        ContainerApp["DateTime MCP Server<br/>Container App (Internal)"]
+        AISvc["AI Services · S0 · MI Only"]
+        FuncApp["Weather Func · Flex FC1"]
+        ContainerApp["MCP Server · Internal CAE"]
     end
 
-    subgraph InfraLayer["Infrastructure (Terraform — 10 Modules)"]
+    subgraph InfraLayer["Terraform · 10 Modules"]
         M1["network"]
         M2["ai-account"]
         M3["ai-project"]
@@ -156,18 +156,18 @@ graph TB
     end
 
     subgraph ObsLayer["Observability"]
-        AppInsights["Application Insights<br/>hybrid-agent-k71j-appinsights"]
-        LAW["Log Analytics Workspace<br/>hybrid-agent-k71j-law"]
-        OTel["Azure Monitor<br/>OpenTelemetry SDK"]
+        AppInsights["App Insights"]
+        LAW["Log Analytics"]
+        OTel["Azure Monitor OTel SDK"]
     end
 
     subgraph SecurityLayer["Security Controls"]
         Entra["Entra ID Auth"]
-        EasyAuth["EasyAuth (Return401)<br/>+ allowedApplications"]
-        ManagedId["System-Assigned<br/>Managed Identity"]
-        NSG["NSGs (NIC + Subnet)"]
-        PE["Private Endpoints (6)"]
-        DNS["Private DNS Zones (7+)"]
+        EasyAuth["EasyAuth + allowedApps"]
+        ManagedId["Managed Identity"]
+        NSG["NSGs"]
+        PE["Private Endpoints ×6"]
+        DNS["Private DNS ×7"]
         NoSharedKey["shared_key: disabled"]
         NoLocalAuth["disableLocalAuth: true"]
     end
@@ -313,52 +313,59 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph VNet["agent-vnet — 10.0.0.0/16 — eastus2"]
-        subgraph S1["agent-subnet<br/>10.0.0.0/24<br/>Delegation: Microsoft.App/environments<br/>NSG: agent-vnet-agent-subnet-nsg-eastus2"]
-            DataProxy["AI Services Data Proxy<br/>(Network Injection into VNet)"]
+    subgraph VNet["agent-vnet · 10.0.0.0/16 · eastus2"]
+        subgraph S1["agent-subnet · 10.0.0.0/24"]
+            S1D["Delegated: App/environments"]
+            DataProxy["AI Services Data Proxy"]
         end
 
-        subgraph S2["pe-subnet<br/>10.0.1.0/24<br/>NSG: agent-vnet-pe-subnet-nsg-eastus2"]
-            PE1["PE: aiservicesk71j<br/>→ cognitiveservices"]
-            PE2["PE: aiservicesk71jst<br/>→ blob"]
-            PE3["PE: aiservicesk71jcosmosdb<br/>→ documents"]
-            PE4["PE: weatherk71j-func<br/>→ sites"]
-            PE5["PE: toolqk71jst<br/>→ queue"]
-            PE6["PE: weatherk71jstor<br/>→ file"]
+        subgraph S2["pe-subnet · 10.0.1.0/24"]
+            PE1["PE: AI Services"]
+            PE2["PE: Blob Storage"]
+            PE3["PE: Cosmos DB"]
+            PE4["PE: Weather Function"]
+            PE5["PE: Queue Storage"]
+            PE6["PE: File Storage"]
         end
 
-        subgraph S3["mcp-subnet<br/>10.0.2.0/24<br/>Delegation: Microsoft.App/environments<br/>NSG: agent-vnet-mcp-subnet-nsg-eastus2"]
-            CAE["Container Apps Environment<br/>Internal Load Balancer<br/>Static IP: 10.0.2.160"]
-            MCP["dtmcpk71j-app<br/>HTTPS:443 → 8080<br/>Streamable HTTP MCP"]
+        subgraph S3["mcp-subnet · 10.0.2.0/24"]
+            S3D["Delegated: App/environments"]
+            CAE["CAE Internal LB · 10.0.2.160"]
+            MCP["dtmcpk71j-app · MCP Server"]
         end
 
-        subgraph S4["func-integration-subnet<br/>10.0.3.0/24<br/>Delegation: Microsoft.Web/serverFarms<br/>NSG: agent-vnet-func-integration-subnet-nsg-eastus2"]
-            FuncInt["Weather Function<br/>VNet Integration<br/>(Outbound traffic only)"]
+        subgraph S4["func-integration · 10.0.3.0/24"]
+            S4D["Delegated: Web/serverFarms"]
+            FuncInt["Weather Function VNet Out"]
         end
 
-        subgraph S5["jumpbox-subnet<br/>10.0.4.0/24<br/>NSG (NIC): jumpbox-vm-nsg<br/>NSG (Subnet): agent-vnet-jumpbox-subnet-nsg-eastus2<br/>Both have: AllowSSH TCP/22 Priority 100"]
-            JVM["jumpbox-vm<br/>Standard_B1s / Ubuntu 24.04<br/>Private: 10.0.4.4<br/>Public: 172.176.124.151"]
+        subgraph S5["jumpbox-subnet · 10.0.4.0/24"]
+            S5N["NSG: AllowSSH TCP/22"]
+            JVM["jumpbox-vm · B1s · Ubuntu"]
+            JVM2["10.0.4.4 / 172.176.124.151"]
         end
 
-        subgraph S6["agent-app-subnet<br/>10.0.6.0/23<br/>Delegation: Microsoft.App/environments<br/>NSG: agent-vnet-agent-app-subnet-nsg-eastus2"]
-            AgentCAE["Container Apps Environment<br/>External (internet-facing)<br/>Public FQDN: *.wonderfulplant-f418865a.eastus2.azurecontainerapps.io"]
-            AgentApp["agentappk71j-app<br/>aiohttp + Microsoft Agents SDK<br/>1 CPU / 2Gi / 1-5 replicas<br/>POST /api/messages + GET /healthz"]
+        subgraph S6["agent-app-subnet · 10.0.6.0/23"]
+            S6D["Delegated: App/environments"]
+            AgentCAE["CAE External · internet-facing"]
+            AgentApp["agentappk71j-app"]
+            AgentApp2["Agents SDK · 1-5 replicas"]
         end
     end
 
-    subgraph DNS["Private DNS Zones (All linked to agent-vnet)"]
-        D1["privatelink.cognitiveservices.azure.com<br/>→ AI Services PE"]
-        D2["privatelink.blob.core.windows.net<br/>→ Storage Blob PEs (×2)"]
-        D3["privatelink.documents.azure.com<br/>→ Cosmos DB PE"]
-        D4["privatelink.azurewebsites.net<br/>→ Weather Function PE"]
-        D5["privatelink.queue.core.windows.net<br/>→ Queue Storage PEs (×2)"]
-        D6["privatelink.file.core.windows.net<br/>→ File Storage PE"]
-        D7["niceriver-877b9fd9.eastus2.azurecontainerapps.io<br/>A: * → 10.0.2.160<br/>A: @ → 10.0.2.160"]
+    subgraph DNS["Private DNS Zones"]
+        D1["cognitiveservices → AI Services"]
+        D2["blob → Storage ×2"]
+        D3["documents → Cosmos DB"]
+        D4["azurewebsites → Weather Func"]
+        D5["queue → Queue Storage ×2"]
+        D6["file → File Storage"]
+        D7["CAE zone → 10.0.2.160"]
     end
 
-    subgraph Obs["Observability (not VNet-bound)"]
-        AI["Application Insights<br/>hybrid-agent-k71j-appinsights"]
-        LAW["Log Analytics Workspace<br/>hybrid-agent-k71j-law<br/>PerGB2018 / 30-day retention"]
+    subgraph Obs["Observability"]
+        AI["App Insights"]
+        LAW["Log Analytics · 30d"]
     end
 
     PE1 -.-> D1
@@ -368,7 +375,7 @@ graph TB
     PE5 -.-> D5
     PE6 -.-> D6
     CAE -.-> D7
-    AgentApp -.->|"VNet DNS link resolves<br/>MCP internal FQDN"| D7
+    AgentApp -.->|"VNet DNS → MCP"| D7
 
     MCP -.->|"Telemetry"| AI
     AgentApp -.->|"Telemetry"| AI
@@ -386,6 +393,27 @@ graph TB
     style Obs fill:#fff3bf,stroke:#e67700
 ```
 
+> **Diagram 4 Legend — Subnet Details:**
+> | Subnet | CIDR | Delegation | NSG |
+> |--------|------|------------|-----|
+> | agent-subnet | 10.0.0.0/24 | Microsoft.App/environments | agent-vnet-agent-subnet-nsg-eastus2 |
+> | pe-subnet | 10.0.1.0/24 | — | agent-vnet-pe-subnet-nsg-eastus2 |
+> | mcp-subnet | 10.0.2.0/24 | Microsoft.App/environments | agent-vnet-mcp-subnet-nsg-eastus2 |
+> | func-integration | 10.0.3.0/24 | Microsoft.Web/serverFarms | agent-vnet-func-integration-subnet-nsg-eastus2 |
+> | jumpbox-subnet | 10.0.4.0/24 | — | jumpbox-vm-nsg (NIC) + subnet NSG |
+> | agent-app-subnet | 10.0.6.0/23 | Microsoft.App/environments | agent-vnet-agent-app-subnet-nsg-eastus2 |
+>
+> **Private DNS Zones (all linked to agent-vnet):**
+> | Zone | Target |
+> |------|--------|
+> | privatelink.cognitiveservices.azure.com | AI Services PE |
+> | privatelink.blob.core.windows.net | Storage Blob PEs (×2) |
+> | privatelink.documents.azure.com | Cosmos DB PE |
+> | privatelink.azurewebsites.net | Weather Function PE |
+> | privatelink.queue.core.windows.net | Queue Storage PEs (×2) |
+> | privatelink.file.core.windows.net | File Storage PE |
+> | niceriver-877b9fd9.eastus2.azurecontainerapps.io | A: * → 10.0.2.160, A: @ → 10.0.2.160 |
+
 ---
 
 ## 5. Observability Architecture
@@ -393,36 +421,35 @@ graph TB
 ```mermaid
 graph LR
     subgraph Sources["Telemetry Sources"]
-        AW["Agent Webapp<br/>logger: agent-webapp<br/>+ OTel spans for tool calls"]
-        WF["Weather Function<br/>logger: weather-function"]
-        MCP["MCP Server<br/>logger: datetime-mcp"]
+        AW["Agent Webapp"]
+        WF["Weather Function"]
+        MC["MCP Server"]
     end
 
-    subgraph SDK["Azure Monitor OpenTelemetry SDK"]
-        CFG["configure_azure_monitor()<br/>connection_string=...<br/>enable_live_metrics=True"]
+    subgraph SDK["Azure Monitor OTel SDK"]
+        CFG["configure_azure_monitor()"]
     end
 
-    subgraph AppInsights["Application Insights<br/>hybrid-agent-k71j-appinsights"]
-        LM["Live Metrics<br/>(real-time)"]
-        TX["Transaction Search<br/>(distributed traces)"]
-        MET["Metrics Explorer<br/>(agents.adapter.process.duration)"]
-        FAIL["Failure Analysis<br/>(0 failed requests)"]
+    subgraph AI["Application Insights"]
+        LM["Live Metrics"]
+        TX["Transaction Search"]
+        MET["Metrics Explorer"]
+        FAIL["Failure Analysis"]
     end
 
-    subgraph LAW["Log Analytics Workspace<br/>hybrid-agent-k71j-law"]
+    subgraph LAW["Log Analytics · 30d"]
         KQL["KQL Queries"]
-        RET["30-day retention"]
     end
 
     AW --> CFG
     WF --> CFG
-    MCP --> CFG
-    CFG --> AppInsights
-    AppInsights --> LAW
+    MC --> CFG
+    CFG --> AI
+    AI --> LAW
 
     style Sources fill:#d0ebff,stroke:#1971c2
     style SDK fill:#b2f2bb,stroke:#2f9e44
-    style AppInsights fill:#fff3bf,stroke:#e67700
+    style AI fill:#fff3bf,stroke:#e67700
     style LAW fill:#d0bfff,stroke:#6741d9
 ```
 
