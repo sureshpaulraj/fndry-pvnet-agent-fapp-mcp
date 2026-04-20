@@ -29,6 +29,7 @@ Follow the **[Setup Guide](SETUP-GUIDE.md)** for a complete step-by-step walkthr
 | Document | Description |
 |----------|-------------|
 | [SETUP-GUIDE.md](SETUP-GUIDE.md) | Step-by-step deployment walkthrough with prerequisites |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Step-by-step troubleshooting for common deployment and runtime issues |
 | [SKILL.md](SKILL.md) | Deep-dive technical reference — architecture, modules, lessons learned |
 | [diagrams/architecture-diagrams.md](diagrams/architecture-diagrams.md) | Mermaid architecture diagrams (high-level, component, data flow, network) |
 
