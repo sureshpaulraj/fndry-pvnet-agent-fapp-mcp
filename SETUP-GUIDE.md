@@ -31,14 +31,30 @@ A step-by-step walkthrough for setting up and deploying the Hybrid Network AI Ag
 Open a PowerShell terminal and verify each tool:
 
 ```powershell
-# Check each tool is installed
+# Core tools
 az --version            # Azure CLI — need latest
 terraform --version     # Terraform — need >= 1.5.0
 func --version          # Azure Functions Core Tools — need v4
-docker --version        # Docker Desktop
+docker --version        # Docker Desktop — for local container builds
 python --version        # Python — need 3.11+
 ssh -V                  # SSH client
+
+# For M365 / Teams agent deployment (Phase 7)
+dotnet --version        # .NET SDK — need 8.0+
+a365 --version          # A365 CLI — installed via dotnet tool
 ```
+
+| Tool | Version | Purpose | Required For |
+|------|---------|---------|-------------|
+| **Azure CLI** | Latest | Authentication, Function/ACR deployment | All phases |
+| **Terraform** | >= 1.5.0 | Infrastructure provisioning | Phase 3-4 |
+| **Azure Functions Core Tools** | v4 | Function App publish | Phase 4 |
+| **Docker Desktop** | Latest | Local container builds (MCP + Agent Webapp) | Phase 4, 7 |
+| **Python** | 3.11+ | Application development, unit tests | All phases |
+| **SSH client** | Any | Jump VM access | Phase 4-5 |
+| **.NET SDK** | 8.0+ | A365 CLI prerequisite | Phase 7 |
+| **A365 CLI** | Latest (prerelease) | Teams/M365 agent registration & publishing | Phase 7 |
+| **Git** | Latest | Version control, push to remote | All phases |
 
 **Install links** (if missing):
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows)
@@ -46,6 +62,18 @@ ssh -V                  # SSH client
 - [Azure Functions Core Tools](https://learn.microsoft.com/en-us/azure/azure-functions/functions-run-local#install-the-azure-functions-core-tools)
 - [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/)
 - [Python 3.11](https://www.python.org/downloads/)
+- [.NET SDK 8.0](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [A365 CLI](https://www.nuget.org/packages/Microsoft.Agents.A365.DevTools.Cli) — install via `dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli --prerelease`
+
+### 1.1b Azure Subscription & Permissions Requirements
+
+| Requirement | Details |
+|-------------|--------|
+| Azure subscription | With **Contributor** + **User Access Administrator** roles |
+| Microsoft 365 tenant | Same tenant as Azure — needed for Teams agent |
+| Teams admin access | To approve custom app sideloading or org-wide publishing |
+| Sufficient quota | Standard_B1s VM, Flex Consumption FC1, 2× Container App Environments, AI Services S0 |
+| Region | **eastus2** recommended (supports AI Foundry agent networking) |
 
 ### 1.2 Azure Login
 
@@ -131,7 +159,27 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-**Checkpoint**: All tools installed, Azure CLI authenticated, SSH key exists, SP created with values recorded.
+### 1.6 Create a Blueprint App Registration (for Microsoft Agents SDK)
+
+The Agent Webapp uses the Microsoft Agents SDK which requires its own Entra app registration (separate from the Function App SP).
+
+1. Go to **Microsoft Entra ID** → **App registrations** → **New registration**
+2. Name: `hybrid-agent-blueprint` (or similar)
+3. Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**
+4. Click **Register**
+5. Record the **Application (client) ID** — this is `sdk_client_id`
+6. Go to **Certificates & secrets** → **New client secret** → copy the value — this is `sdk_client_secret`
+
+> **Note**: This app is used for Bot Framework channel auth. The `idp4functionapp` SP is for Terraform + EasyAuth.
+
+### 1.7 Install A365 CLI
+
+```powershell
+dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli --prerelease
+a365 --version
+```
+
+**Checkpoint**: All tools installed, Azure CLI authenticated, SSH key exists, both SPs created with values recorded.
 
 ---
 
@@ -202,13 +250,21 @@ mcp_subnet_name              = "mcp-subnet"
 func_integration_subnet_name = "func-integration-subnet"
 ```
 
-Set the client secret as an environment variable (not in the file):
+Set secrets as environment variables (not in the file):
 
 ```powershell
-$env:TF_VAR_client_secret = "<your-sp-client-secret>"
+$env:TF_VAR_client_secret     = "<your-sp-client-secret>"      # idp4functionapp secret
+$env:TF_VAR_sdk_client_secret = "<your-blueprint-app-secret>"  # Blueprint app secret
 ```
 
-**Checkpoint**: `.env` and `terraform.tfvars` configured with your values. Secret is in env var, not committed to files.
+> **Important**: Also add these to your `terraform.tfvars` (non-secret values only):
+> ```hcl
+> sdk_client_id          = "<your-blueprint-app-client-id>"
+> foundry_agent_id       = ""   # Set after Step 4.6
+> agent_webapp_mi_app_id = ""   # Set after Phase 7 first deploy
+> ```
+
+**Checkpoint**: `.env` and `terraform.tfvars` configured with your values. Secrets are in env vars, not committed to files.
 
 ---
 
@@ -616,6 +672,116 @@ In the Azure Portal → **Resource Group** → `rg-hybrid-agent`, you'll see ~45
 | `agent-vnet` | Virtual Network (5 subnets) |
 | Various `*-pe` | Private Endpoints |
 | Various `privatelink.*` | Private DNS Zones |
+
+---
+
+## Phase 6b: Deploy Agent Webapp to Teams (M365 via A365)
+
+This phase deploys the Agent Webapp as a Teams-accessible bot using the Microsoft Agents SDK and A365 tooling.
+
+### 6b.1 Build and Push Agent Webapp Container
+
+```powershell
+$ACR = terraform -chdir=infra-terraform output -raw datetime_mcp_acr_name
+
+# Login to ACR
+az acr login --name $ACR
+
+# Build locally (preferred over az acr build to avoid encoding issues on Windows)
+cd agent-webapp
+docker build -t "$ACR.azurecr.io/agent-webapp:latest" .
+docker push "$ACR.azurecr.io/agent-webapp:latest"
+cd ..
+```
+
+### 6b.2 Register the Agent with A365
+
+```powershell
+# Login to A365 CLI
+a365 auth login --tenant-id <your-tenant-id>
+
+# Setup permissions and bot registration
+cd agent-webapp/manifest
+a365 setup all --skip-infrastructure --config a365.config.json --verbose
+```
+
+The `a365.config.json` should contain:
+
+```json
+{
+  "name": "PCE Agent",
+  "description": "Hybrid Network AI Agent with Weather and DateTime tools",
+  "needDeployment": false,
+  "messagingEndpoint": "https://<agent-webapp-fqdn>/api/messages",
+  "appRegistration": {
+    "clientId": "<blueprint-app-client-id>"
+  }
+}
+```
+
+### 6b.3 Publish to Teams
+
+```powershell
+a365 publish
+```
+
+This uploads the Teams app manifest and makes the agent available in your organization's Teams app catalog.
+
+### 6b.4 Configure RBAC for Agent Webapp Managed Identity
+
+After deploying the Container App, the system-assigned managed identity needs these roles (defined in `main.tf`):
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| Cognitive Services OpenAI User | AI Services account | OpenAI model access |
+| Azure AI Developer | AI Services account | Foundry development actions |
+| Cognitive Services User | AI Services account | Wildcard CognitiveServices access |
+| Cognitive Services User | Foundry project | Agents API data-plane access |
+| Azure AI Developer | Foundry project | Agents API project operations |
+
+These are provisioned by Terraform. Additionally, update EasyAuth `allowedApplications` on the Weather Function to include the MI's appId:
+
+```powershell
+# Get MI appId
+$principalId = az containerapp show --name <agent-app-name> `
+    --resource-group rg-hybrid-agent --query "identity.principalId" -o tsv
+$miAppId = az ad sp show --id $principalId --query appId -o tsv
+
+# Add to EasyAuth via Terraform (azapi_resource in main.tf) or manually
+```
+
+> **Key insight**: Use the MI's **Application (client) ID** — not its principal/object ID — in `allowedApplications`.
+
+### 6b.5 Test in Teams
+
+1. Open **Microsoft Teams** → search for **PCE Agent** in the app catalog
+2. Start a personal chat with the agent
+3. Send: `hey there` → should get a greeting response
+4. Send: `what is the pacific time now and weather in Seattle, WA?`
+5. Expected: Combined response with current Pacific time and Seattle weather data
+
+---
+
+## Phase 6c: Verify App Insights Telemetry
+
+All three services (Agent Webapp, Weather Function, MCP Server) are instrumented with Azure Monitor OpenTelemetry.
+
+### View Telemetry
+
+1. Go to **Azure Portal** → **Application Insights** (`hybrid-agent-<suffix>-appinsights`)
+2. **Overview**: Check failed requests (should be 0), server response time, and server request count
+3. **Live Metrics**: See real-time requests as you interact with the agent in Teams
+4. **Metrics** → select `agents.adapter.process.duration` to see agent processing times
+5. **Transaction Search**: View end-to-end distributed traces across all services
+
+### Expected Metrics After Testing
+
+| Metric | Healthy Range |
+|--------|---------------|
+| Failed requests | 0 |
+| Server response time (avg) | 1-3 seconds |
+| Server requests | Increases with each Teams message |
+| `agents.adapter.process.duration` | 3-20k ms (includes Foundry + tool calls) |
 
 ---
 

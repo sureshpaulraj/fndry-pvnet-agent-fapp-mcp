@@ -41,7 +41,7 @@ User → M365 (Teams/Outlook) → Agent Webapp (Container App, aiohttp + Microso
 | jumpbox-subnet | 10.0.4.0/24 | Jump VM for testing | None |
 | agent-app-subnet | 10.0.6.0/23 | Agent Webapp Container App (external) | Microsoft.App/environments |
 
-### Resources Created (~55+)
+### Resources Created (~60+)
 
 - VNet with 6 subnets
 - AI Services account (S0, disableLocalAuth=true)
@@ -55,7 +55,8 @@ User → M365 (Teams/Outlook) → Agent Webapp (Container App, aiohttp + Microso
 - Jump VM (Ubuntu 24.04, Standard_B1s) with public IP
 - gpt-4.1-mini model deployment
 - Tool queue storage account with weather-input/weather-output queues
-- Multiple RBAC role assignments
+- Application Insights + Log Analytics workspace (all 3 services instrumented)
+- Multiple RBAC role assignments (5 for agent webapp MI, 4 for function MI, etc.)
 
 ---
 
@@ -348,7 +349,7 @@ docker run -p 8080:8080 datetime-mcp
 
 ## Step 5: Write the Terraform Infrastructure
 
-The infrastructure is organized into 9 modules called from a root `main.tf`. The root module:
+The infrastructure is organized into 10 modules called from a root `main.tf`. The root module:
 1. Generates a random 4-character suffix for unique resource names
 2. Creates the resource group
 3. Calls modules in dependency order
