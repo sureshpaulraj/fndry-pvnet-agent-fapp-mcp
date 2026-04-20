@@ -6,18 +6,18 @@
     "full": "PCE Agent"
   },
   "description": {
-    "short": "A brief description of what your agent does.",
-    "full": "A comprehensive description of your agent\u0027s capabilities and purpose. Explain what problems it solves, what data it can access, and how users will interact with it. This description helps users understand when and how to use your agent effectively."
+    "short": "PCE Agent provides weather and datetime services via Azure Foundry.",
+    "full": "PCE Agent is an AI-powered assistant that provides real-time weather information and datetime services. It leverages Azure AI Foundry with function tools for weather lookups and date-time calculations, accessible through Microsoft 365."
   },
   "icons": {
     "outline": "outline.png",
     "color": "color.png"
   },
   "accentColor": "#9ec9d9",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "manifestVersion": "devPreview",
   "developer": {
-    "name": "Microsoft Corporation",
+    "name": "PCE Development Team",
     "mpnId": "",
     "websiteUrl": "https://go.microsoft.com/fwlink/?LinkId=518028",
     "privacyUrl": "https://go.microsoft.com/fwlink/?LinkId=518028",

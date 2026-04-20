@@ -1,22 +1,38 @@
-"""Agent 365 Web Service — FastAPI app that handles Bot Framework Activities.
+"""PCE Agent — v20 using Microsoft Agents SDK hosting + A365 Observability.
 
-Endpoints:
-  POST /api/messages  — receives Activities from M365 (Teams, Outlook, etc.)
-  GET  /healthz       — health check for Container App probes
-  GET  /              — service info
+Uses the official Microsoft Agents SDK (same as Agent365-Samples) for:
+  - Incoming activity deserialization and auth validation
+  - Outgoing reply delivery via context.send_activity()
+  - Token management via MsalConnectionManager
+  - A365 Observability with BaggageBuilder + token exchange
+
+Env vars required (set on Container App):
+  CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID
+  CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET
+  CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID
+  CONNECTIONSMAP__0__SERVICEURL=*
+  CONNECTIONSMAP__0__CONNECTION=SERVICE_CONNECTION
+  AUTH_HANDLER_NAME=AGENTIC  (for observability token exchange)
 """
 
-import hmac
-import json
+import asyncio
 import logging
 import os
-import time
+from os import environ
 
-import httpx
-from fastapi import FastAPI, Request, Response
+from dotenv import load_dotenv
 
-from bot import process_message
-from config import BOT_APP_ID, BOT_APP_SECRET, BOT_TENANT_ID
+# ─── Azure Monitor (App Insights) — must be configured BEFORE other imports ──
+load_dotenv(override=True)
+
+_ai_conn_str = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+if _ai_conn_str and _ai_conn_str != "placeholder":
+    from azure.monitor.opentelemetry import configure_azure_monitor
+    configure_azure_monitor(
+        connection_string=_ai_conn_str,
+        logger_name="agent-webapp",
+        enable_live_metrics=True,
+    )
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,148 +40,197 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent-webapp")
 
-app = FastAPI(title="PCE Agent — A365 Web Service", version="1.0.0")
+from aiohttp.web import Application, Request, Response, json_response, run_app
+from microsoft_agents.activity import Activity, load_configuration_from_env
+from microsoft_agents.authentication.msal import MsalConnectionManager
+from microsoft_agents.hosting.aiohttp import CloudAdapter, start_agent_process
+from microsoft_agents.hosting.core import (
+    AgentApplication,
+    Authorization,
+    MemoryStorage,
+    TurnContext,
+    TurnState,
+)
 
-# ─── Health / Info ───────────────────────────────────────────────────────────
+from bot import process_message
+from token_cache import cache_agentic_token, get_cached_agentic_token
 
+# Enable SDK debug logging
+ms_agents_logger = logging.getLogger("microsoft_agents")
+ms_agents_logger.addHandler(logging.StreamHandler())
+ms_agents_logger.setLevel(logging.INFO)
 
-@app.get("/healthz")
-async def healthz():
-    return {"status": "ok", "agent": "pce", "framework": "a365"}
+# Observability imports — graceful fallback if packages not available
+try:
+    from microsoft_agents_a365.observability.core.config import configure as configure_observability
+    from microsoft_agents_a365.observability.core.middleware.baggage_builder import BaggageBuilder
+    from microsoft_agents_a365.runtime.environment_utils import get_observability_authentication_scope
+    HAS_OBSERVABILITY = True
+except ImportError as _obs_err:
+    logger.warning("Observability import failed: %s", _obs_err)
+    HAS_OBSERVABILITY = False
 
+# ─── Microsoft Agents SDK Setup ─────────────────────────────────────────────
 
-@app.get("/")
-async def root():
-    return {
-        "service": "PCE Agent — A365 Web Service",
-        "version": "1.0.0",
-        "endpoints": ["/api/messages", "/healthz"],
-    }
+agents_sdk_config = load_configuration_from_env(environ)
+logger.info("SDK config loaded, keys: %s", list(agents_sdk_config.keys()))
 
+storage = MemoryStorage()
+connection_manager = MsalConnectionManager(**agents_sdk_config)
+adapter = CloudAdapter(connection_manager=connection_manager)
+authorization = Authorization(storage, connection_manager, **agents_sdk_config)
 
-# ─── Bot Connector helpers ──────────────────────────────────────────────────
+AGENT_APP = AgentApplication[TurnState](
+    storage=storage,
+    adapter=adapter,
+    authorization=authorization,
+    **agents_sdk_config,
+)
 
-_token_cache: dict = {"token": None, "expires_at": 0}
+# Auth handler name for observability token exchange
+AUTH_HANDLER_NAME = os.environ.get("AUTH_HANDLER_NAME") or None
+if AUTH_HANDLER_NAME:
+    logger.info("Auth handler configured: %s", AUTH_HANDLER_NAME)
+else:
+    logger.info("No AUTH_HANDLER_NAME set — observability token exchange disabled")
 
-
-async def _get_bot_token() -> str:
-    """Get an OAuth token for the Bot Connector service."""
-    now = time.time()
-    if _token_cache["token"] and _token_cache["expires_at"] > now + 60:
-        return _token_cache["token"]
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"https://login.microsoftonline.com/{BOT_TENANT_ID}/oauth2/v2.0/token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": BOT_APP_ID,
-                "client_secret": BOT_APP_SECRET,
-                "scope": "https://api.botframework.com/.default",
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-    _token_cache["token"] = data["access_token"]
-    _token_cache["expires_at"] = now + data.get("expires_in", 3600)
-    return data["access_token"]
-
-
-async def _send_activity(service_url: str, conversation_id: str, activity: dict):
-    """Send a reply Activity back via the Bot Connector REST API."""
-    url = (
-        f"{service_url.rstrip('/')}/v3/conversations/"
-        f"{conversation_id}/activities"
-    )
-    token = await _get_bot_token()
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            url,
-            json=activity,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            timeout=120,
-        )
-        if resp.status_code >= 400:
-            logger.error(
-                "Bot Connector error %s: %s", resp.status_code, resp.text
-            )
+# ─── Observability Setup ────────────────────────────────────────────────────
 
 
-# ─── Main messaging endpoint ────────────────────────────────────────────────
-
-
-@app.post("/api/messages")
-async def messages(request: Request):
-    """Handle incoming Bot Framework Activities from M365."""
-    body = await request.json()
-    activity_type = body.get("type", "")
-
-    if activity_type == "message":
-        user_text = body.get("text", "").strip()
-        if not user_text:
-            return Response(status_code=200)
-
-        logger.info("Received message: %s", user_text[:100])
-
-        # Process through Foundry agent (synchronous — runs in threadpool)
-        import asyncio
-
-        reply_text = await asyncio.to_thread(process_message, user_text)
-
-        # Build reply activity
-        reply_activity = {
-            "type": "message",
-            "from": body.get("recipient"),
-            "recipient": body.get("from"),
-            "replyToId": body.get("id"),
-            "text": reply_text,
-        }
-
-        service_url = body.get("serviceUrl", "")
-        conversation_id = body.get("conversation", {}).get("id", "")
-
-        if service_url and conversation_id:
-            await _send_activity(service_url, conversation_id, reply_activity)
+def _token_resolver(agent_id: str, tenant_id: str) -> str | None:
+    """Token resolver for A365 Observability exporter — uses cached agentic token."""
+    try:
+        cached = get_cached_agentic_token(tenant_id, agent_id)
+        if cached:
+            logger.debug("Observability token resolved for %s:%s", tenant_id[:8], agent_id[:8])
         else:
-            logger.warning("No serviceUrl/conversationId — returning inline")
-            return reply_activity
-
-    elif activity_type == "conversationUpdate":
-        members_added = body.get("membersAdded", [])
-        bot_id = body.get("recipient", {}).get("id", "")
-        for member in members_added:
-            if member.get("id") != bot_id:
-                welcome = {
-                    "type": "message",
-                    "from": body.get("recipient"),
-                    "recipient": member,
-                    "text": (
-                        "Hello! I'm the PCE Agent. I can help with weather "
-                        "information and date/time queries. Try asking:\n"
-                        "- What's the weather in Seattle?\n"
-                        "- What time is it in Tokyo?\n"
-                        "- What's the forecast for London?"
-                    ),
-                }
-                service_url = body.get("serviceUrl", "")
-                conversation_id = body.get("conversation", {}).get("id", "")
-                if service_url and conversation_id:
-                    await _send_activity(
-                        service_url, conversation_id, welcome
-                    )
-
-    return Response(status_code=200)
+            logger.debug("No cached observability token for %s:%s", tenant_id[:8], agent_id[:8])
+        return cached
+    except Exception as exc:
+        logger.error("Token resolver error: %s", exc)
+        return None
 
 
-# ─── Run with uvicorn ────────────────────────────────────────────────────────
+if HAS_OBSERVABILITY:
+    try:
+        status = configure_observability(
+            service_name=os.environ.get("OBSERVABILITY_SERVICE_NAME", "pce-agent"),
+            service_namespace=os.environ.get("OBSERVABILITY_SERVICE_NAMESPACE", "hybrid-network"),
+            token_resolver=_token_resolver,
+        )
+        if status:
+            logger.info("A365 Observability configured successfully")
+        else:
+            logger.warning("A365 Observability configuration returned False")
+    except Exception as exc:
+        logger.warning("A365 Observability setup failed (non-fatal): %s", exc)
+else:
+    logger.info("A365 Observability packages not installed — skipping")
+
+
+# ─── Activity Handlers ──────────────────────────────────────────────────────
+
+@AGENT_APP.activity("message")
+async def on_message(context: TurnContext, _: TurnState):
+    """Handle all user messages — process via Foundry agent and reply."""
+    user_text = (context.activity.text or "").strip()
+    if not user_text:
+        return
+
+    from_prop = context.activity.from_property
+    recipient = context.activity.recipient
+    tenant_id = getattr(recipient, "tenant_id", None) if recipient else None
+    agent_id = getattr(recipient, "agentic_app_id", None) if recipient else None
+
+    logger.info(
+        "Message from %s (%s): %s",
+        getattr(from_prop, "name", "?"),
+        getattr(from_prop, "id", "?")[:30] if from_prop else "?",
+        user_text[:120],
+    )
+
+    # Exchange token for observability if auth handler is configured
+    if AUTH_HANDLER_NAME and HAS_OBSERVABILITY and tenant_id and agent_id:
+        try:
+            exaau_token = await AGENT_APP.auth.exchange_token(
+                context,
+                scopes=get_observability_authentication_scope(),
+                auth_handler_id=AUTH_HANDLER_NAME,
+            )
+            cache_agentic_token(tenant_id, agent_id, exaau_token.token)
+            logger.info("Observability token exchanged and cached")
+        except Exception as exc:
+            logger.warning("Observability token exchange failed (non-fatal): %s", exc)
+
+    # Wrap processing in BaggageBuilder context for observability tracing
+    async def _process():
+        # Send typing indicator
+        await context.send_activity(Activity(type="typing"))
+
+        try:
+            reply_text = await asyncio.to_thread(process_message, user_text)
+        except Exception as exc:
+            logger.exception("process_message failed")
+            reply_text = f"Sorry, I encountered an error: {exc}"
+
+        logger.info("Reply (%d chars): %s", len(reply_text), reply_text[:200])
+        await context.send_activity(reply_text)
+        logger.info("Reply sent via Microsoft Agents SDK")
+
+    if HAS_OBSERVABILITY and tenant_id and agent_id:
+        with BaggageBuilder().tenant_id(tenant_id).agent_id(agent_id).build():
+            await _process()
+    else:
+        await _process()
+
+
+@AGENT_APP.activity("installationUpdate")
+async def on_installation_update(context: TurnContext, _: TurnState):
+    """Handle agent install/uninstall events."""
+    action = context.activity.action
+    logger.info("InstallationUpdate: action=%s", action)
+    if action == "add":
+        await context.send_activity(
+            "Hello! I'm PCE Agent — I can help with weather, time, and more. "
+            "Just send me a message!"
+        )
+    elif action == "remove":
+        await context.send_activity("Goodbye! Thanks for using PCE Agent.")
+
+
+# ─── HTTP Endpoints ─────────────────────────────────────────────────────────
+
+async def entry_point(req: Request) -> Response:
+    """Bot Framework messages endpoint — handled by Microsoft Agents SDK."""
+    return await start_agent_process(req, AGENT_APP, adapter)
+
+
+async def healthz(req: Request) -> Response:
+    return json_response({
+        "status": "healthy",
+        "service": "agent-webapp",
+        "version": "v20-obs",
+        "observability": HAS_OBSERVABILITY,
+    })
+
+
+async def root(req: Request) -> Response:
+    return json_response({
+        "service": "PCE Agent (A365)",
+        "version": "v20-obs",
+        "endpoints": ["/api/messages", "/healthz"],
+    })
+
+
+# ─── Application ────────────────────────────────────────────────────────────
+
+app = Application()
+app.router.add_post("/api/messages", entry_point)
+app.router.add_get("/api/messages", lambda _: Response(status=200))
+app.router.add_get("/healthz", healthz)
+app.router.add_get("/", root)
 
 if __name__ == "__main__":
-    import uvicorn
-
-    port = int(os.getenv("PORT", "8080"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", "8080"))
+    logger.info("Starting agent-webapp v20-obs on port %d", port)
+    run_app(app, host="0.0.0.0", port=port)

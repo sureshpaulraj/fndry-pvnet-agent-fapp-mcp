@@ -15,10 +15,23 @@
 
 import json
 import logging
+import os
 import random
 from datetime import datetime, timezone, timedelta
 
 import azure.functions as func
+
+# ─── Azure Monitor (App Insights) ────────────────────────────────────────────
+_ai_conn_str = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+if _ai_conn_str and _ai_conn_str != "placeholder":
+    from azure.monitor.opentelemetry import configure_azure_monitor
+    configure_azure_monitor(
+        connection_string=_ai_conn_str,
+        logger_name="weather-function",
+        enable_live_metrics=True,
+    )
+
+logger = logging.getLogger("weather-function")
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 

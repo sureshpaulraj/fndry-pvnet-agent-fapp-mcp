@@ -19,6 +19,16 @@ from datetime import datetime, timezone, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import os
 
+# ─── Azure Monitor (App Insights) ────────────────────────────────────────────
+_ai_conn_str = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+if _ai_conn_str and _ai_conn_str != "placeholder":
+    from azure.monitor.opentelemetry import configure_azure_monitor
+    configure_azure_monitor(
+        connection_string=_ai_conn_str,
+        logger_name="datetime-mcp",
+        enable_live_metrics=True,
+    )
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("datetime-mcp")
 

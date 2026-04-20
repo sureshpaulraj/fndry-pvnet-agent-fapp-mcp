@@ -39,3 +39,5 @@ a365.generated.config.json
 # ─── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+easyauth-fix.json

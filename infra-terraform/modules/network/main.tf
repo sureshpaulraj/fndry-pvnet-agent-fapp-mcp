@@ -100,9 +100,9 @@ resource "azurerm_subnet" "func_integration" {
   address_prefixes     = ["10.0.3.0/24"]
 
   delegation {
-    name = "Microsoft-Web-serverFarms"
+    name = "Microsoft-App-environments"
     service_delegation {
-      name = "Microsoft.Web/serverFarms"
+      name = "Microsoft.App/environments"
       actions = [
         "Microsoft.Network/virtualNetworks/subnets/join/action",
       ]

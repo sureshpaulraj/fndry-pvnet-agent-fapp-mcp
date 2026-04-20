@@ -52,6 +52,17 @@ module "network" {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Application Insights (observability for all services)
+# ═══════════════════════════════════════════════════════════════════════════════
+module "app_insights" {
+  source = "./modules/app-insights"
+
+  location            = var.location
+  resource_group_name = azurerm_resource_group.main.name
+  base_name           = "hybrid-agent-${local.suffix}"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # AI Services Account — PUBLIC access for portal-based development
 # ═══════════════════════════════════════════════════════════════════════════════
 module "ai_account" {
@@ -133,6 +144,7 @@ module "weather_function" {
   base_name             = "weather${local.suffix}"
   blob_dns_zone_id      = module.private_endpoints.blob_dns_zone_id
   blob_dns_zone_name    = module.private_endpoints.blob_dns_zone_name
+  appinsights_connection_string = module.app_insights.connection_string
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -146,6 +158,7 @@ module "datetime_mcp" {
   mcp_subnet_id       = module.network.mcp_subnet_id
   vnet_id             = module.network.vnet_id
   base_name           = "dtmcp${local.suffix}"
+  appinsights_connection_string = module.app_insights.connection_string
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -233,12 +246,96 @@ module "agent_webapp" {
   bot_app_id     = var.bot_app_id
   bot_app_secret = var.bot_app_secret
   tenant_id      = var.tenant_id
+  appinsights_connection_string = module.app_insights.connection_string
+
+  # Microsoft Agents SDK service connection
+  sdk_client_id     = var.sdk_client_id
+  sdk_client_secret = var.sdk_client_secret
 
   depends_on = [module.datetime_mcp, module.weather_function, module.foundry_agent]
+}
+
+# ─── Role assignments for agent webapp managed identity on AI Services ──────
+resource "azurerm_role_assignment" "agent_webapp_openai_user" {
+  scope                = module.ai_account.account_id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = module.agent_webapp.agent_app_principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "agent_webapp_ai_developer" {
+  scope                = module.ai_account.account_id
+  role_definition_name = "Azure AI Developer"
+  principal_id         = module.agent_webapp.agent_app_principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "agent_webapp_cognitive_services_user" {
+  scope                = module.ai_account.account_id
+  role_definition_name = "Cognitive Services User"
+  principal_id         = module.agent_webapp.agent_app_principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# ─── Project-scoped roles (required for Foundry Agents API) ─────────────────
+resource "azurerm_role_assignment" "agent_webapp_project_cs_user" {
+  scope                = module.ai_project.project_id
+  role_definition_name = "Cognitive Services User"
+  principal_id         = module.agent_webapp.agent_app_principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "agent_webapp_project_ai_dev" {
+  scope                = module.ai_project.project_id
+  role_definition_name = "Azure AI Developer"
+  principal_id         = module.agent_webapp.agent_app_principal_id
+  principal_type       = "ServicePrincipal"
 }
 
 # ─── Data source: get ACR credentials (created by datetime_mcp module) ──────
 data "azurerm_container_registry" "mcp" {
   name                = module.datetime_mcp.acr_name
   resource_group_name = azurerm_resource_group.main.name
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EasyAuth on Weather Function — allow agent webapp MI to call function
+# ═══════════════════════════════════════════════════════════════════════════════
+resource "azapi_resource" "weather_easyauth" {
+  count     = var.agent_webapp_mi_app_id != "" ? 1 : 0
+  type      = "Microsoft.Web/sites/config@2022-03-01"
+  name      = "authsettingsV2"
+  parent_id = module.weather_function.function_app_id
+
+  body = {
+    properties = {
+      globalValidation = {
+        requireAuthentication    = true
+        unauthenticatedClientAction = "Return401"
+      }
+      identityProviders = {
+        azureActiveDirectory = {
+          enabled = true
+          registration = {
+            clientId                    = var.client_id
+            clientSecretSettingName     = "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET"
+            openIdIssuer                = "https://sts.windows.net/${var.tenant_id}/v2.0"
+          }
+          validation = {
+            defaultAuthorizationPolicy = {
+              allowedApplications = [
+                var.client_id,
+                var.agent_webapp_mi_app_id
+              ]
+            }
+          }
+        }
+      }
+      platform = {
+        enabled = true
+      }
+    }
+  }
+
+  depends_on = [module.weather_function, module.agent_webapp]
 }

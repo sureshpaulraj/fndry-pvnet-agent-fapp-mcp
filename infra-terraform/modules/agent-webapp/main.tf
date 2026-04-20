@@ -82,6 +82,30 @@ variable "tenant_id" {
   type = string
 }
 
+variable "appinsights_connection_string" {
+  type        = string
+  description = "Application Insights connection string for telemetry"
+  default     = ""
+  sensitive   = true
+}
+
+variable "sdk_client_id" {
+  type        = string
+  description = "Microsoft Agents SDK service connection client ID"
+}
+
+variable "sdk_client_secret" {
+  type        = string
+  description = "Microsoft Agents SDK service connection client secret"
+  sensitive   = true
+}
+
+variable "sdk_auth_handler_name" {
+  type        = string
+  description = "Auth handler name for observability token exchange"
+  default     = "AGENTIC"
+}
+
 # ─── Container Apps Environment (external, VNet-integrated) ─────────────────
 resource "azurerm_container_app_environment" "agent" {
   name                           = "${var.base_name}-env"
@@ -89,6 +113,10 @@ resource "azurerm_container_app_environment" "agent" {
   resource_group_name            = var.resource_group_name
   infrastructure_subnet_id       = var.agent_app_subnet_id
   internal_load_balancer_enabled = false # External — M365 needs to reach us
+
+  lifecycle {
+    ignore_changes = [infrastructure_resource_group_name]
+  }
 }
 
 # ─── Agent Webapp Container App ─────────────────────────────────────────────
@@ -116,6 +144,16 @@ resource "azurerm_container_app" "agent" {
   secret {
     name  = "bot-app-secret"
     value = var.bot_app_secret != "" ? var.bot_app_secret : "placeholder"
+  }
+
+  secret {
+    name  = "sdk-client-secret"
+    value = var.sdk_client_secret
+  }
+
+  secret {
+    name  = "appinsights-connection-string"
+    value = var.appinsights_connection_string != "" ? var.appinsights_connection_string : "placeholder"
   }
 
   ingress {
@@ -178,6 +216,35 @@ resource "azurerm_container_app" "agent" {
       env {
         name  = "AZURE_TENANT_ID"
         value = var.tenant_id
+      }
+      env {
+        name        = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        secret_name = "appinsights-connection-string"
+      }
+      # Microsoft Agents SDK service connection
+      env {
+        name  = "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID"
+        value = var.sdk_client_id
+      }
+      env {
+        name        = "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET"
+        secret_name = "sdk-client-secret"
+      }
+      env {
+        name  = "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID"
+        value = var.tenant_id
+      }
+      env {
+        name  = "CONNECTIONSMAP__0__SERVICEURL"
+        value = "*"
+      }
+      env {
+        name  = "CONNECTIONSMAP__0__CONNECTION"
+        value = "SERVICE_CONNECTION"
+      }
+      env {
+        name  = "AUTH_HANDLER_NAME"
+        value = var.sdk_auth_handler_name
       }
 
       liveness_probe {

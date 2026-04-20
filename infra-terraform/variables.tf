@@ -185,8 +185,28 @@ variable "bot_app_secret" {
   default     = ""
 }
 
+variable "sdk_client_id" {
+  description = "Microsoft Agents SDK service connection client ID (Blueprint App ID)"
+  type        = string
+  default     = ""
+}
+
+variable "sdk_client_secret" {
+  description = "Microsoft Agents SDK service connection client secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "agent_app_subnet_name" {
   description = "Agent webapp Container Apps subnet name"
   type        = string
   default     = "agent-app-subnet"
+}
+
+# ─── EasyAuth for Weather Function ──────────────────────────────────────────
+variable "agent_webapp_mi_app_id" {
+  description = "Agent webapp managed identity Application (client) ID. Required for EasyAuth allowedApplications on weather function. Get via: az ad sp show --id <principalId> --query appId"
+  type        = string
+  default     = ""
 }

@@ -29,6 +29,13 @@ variable "base_name" {
   }
 }
 
+variable "appinsights_connection_string" {
+  type        = string
+  description = "Application Insights connection string for telemetry"
+  default     = ""
+  sensitive   = true
+}
+
 # ─── Container Registry ─────────────────────────────────────────────────────
 resource "azurerm_container_registry" "mcp" {
   name                = "acr${replace(var.base_name, "-", "")}"
@@ -69,6 +76,11 @@ resource "azurerm_container_app" "mcp" {
     value = azurerm_container_registry.mcp.admin_password
   }
 
+  secret {
+    name  = "appinsights-connection-string"
+    value = var.appinsights_connection_string != "" ? var.appinsights_connection_string : "placeholder"
+  }
+
   ingress {
     external_enabled = true # external within the env, but env is internal-only
     target_port      = 8080
@@ -93,6 +105,10 @@ resource "azurerm_container_app" "mcp" {
       env {
         name  = "PORT"
         value = "8080"
+      }
+      env {
+        name        = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        secret_name = "appinsights-connection-string"
       }
     }
   }

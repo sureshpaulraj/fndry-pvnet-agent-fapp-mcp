@@ -15,12 +15,12 @@ User → Jump VM (VNet) → Foundry Agent (cloud, Assistants API)
                               ↓
        Jump VM → submits tool outputs → Agent responds
 
-User → M365 (Teams/Outlook) → Agent Webapp (Container App, external)
-                                     ↓ POST /api/messages
-                              Foundry Agent (Assistants API)
+User → M365 (Teams/Outlook) → Agent Webapp (Container App, aiohttp + Microsoft Agents SDK)
+                                     ↓ POST /api/messages (Bot Framework Activities)
+                              Foundry Agent (Assistants API, managed identity auth)
                                      ↓ requires_action
                               Agent Webapp calls tools:
-                                ├── Weather Function (via VNet)
+                                ├── Weather Function (via VNet, EasyAuth + MI token)
                                 └── MCP Server (via VNet, internal CAE DNS)
                                      ↓
                               Agent Webapp → Bot Connector → M365 reply
@@ -139,10 +139,11 @@ hybrid-network/
 │   ├── test_agent.py
 │   └── smoke_test.py
 ├── agent-webapp/
-│   ├── app.py                    # FastAPI web service (/api/messages, /healthz)
+│   ├── app.py                    # aiohttp web service + Microsoft Agents SDK (/api/messages, /healthz)
 │   ├── bot.py                    # Foundry Assistants API handler
-│   ├── tools.py                  # Weather Function & MCP Server tool calls
+│   ├── tools.py                  # Weather Function & MCP Server tool calls (OTel instrumented)
 │   ├── config.py                 # Environment-based configuration
+│   ├── token_cache.py            # A365 observability token cache
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   ├── test_app.py               # 14 unit tests
@@ -180,6 +181,7 @@ hybrid-network/
         ├── weather-function/
         ├── datetime-mcp/
         ├── agent-webapp/
+        ├── app-insights/          # Log Analytics + Application Insights
         ├── jump-vm/
         └── foundry-agent/
 ```
@@ -230,7 +232,13 @@ tenant_id       = "<your-tenant-id>"
 client_id       = "<your-sp-client-id>"
 client_secret   = "<your-sp-client-secret>"
 location        = "eastus2"
+
+# Microsoft Agents SDK service connection (Blueprint App)
+sdk_client_id    = "<your-blueprint-app-client-id>"
+foundry_agent_id = "<your-foundry-agent-id>"  # e.g. "asst_xxxxx"
 ```
+
+> **Note**: `client_secret` and `sdk_client_secret` should be passed via `TF_VAR_client_secret` and `TF_VAR_sdk_client_secret` environment variables rather than committed to tfvars.
 
 ### Python Requirements (root)
 
@@ -279,6 +287,7 @@ Key design decisions:
 
 ```
 azure-functions
+azure-monitor-opentelemetry
 ```
 
 ### Local Testing
@@ -312,10 +321,18 @@ Key design:
 ```dockerfile
 FROM python:3.11-slim
 WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 EXPOSE 8080
 ENV PORT=8080
 CMD ["python", "server.py"]
+```
+
+### mcp-server/requirements.txt
+
+```
+azure-monitor-opentelemetry
 ```
 
 ### Local Testing
@@ -373,14 +390,17 @@ provider "azapi" {
 
 ```
 network
+  ├── app_insights (standalone — Log Analytics + Application Insights)
   ├── ai_account (needs agent_subnet_id)
   ├── dependencies (standalone)
   │     └── private_endpoints (needs vnet, pe_subnet, ai_account, dependencies)
   │           └── ai_project (needs account, dependencies; depends_on private_endpoints)
-  ├── weather_function (needs vnet, subnets, blob_dns_zone from private_endpoints)
-  ├── datetime_mcp (needs mcp_subnet, vnet)
+  ├── weather_function (needs vnet, subnets, blob_dns_zone, appinsights_connection_string)
+  ├── datetime_mcp (needs mcp_subnet, vnet, appinsights_connection_string)
   ├── jump_vm (needs jumpbox_subnet)
-  └── foundry_agent (needs ai_account, ai_project, weather_function, network, private_endpoints)
+  ├── foundry_agent (needs ai_account, ai_project, weather_function, network, private_endpoints)
+  └── agent_webapp (needs datetime_mcp, weather_function, foundry_agent, appinsights_connection_string)
+       └── 5 RBAC role assignments at account + project scope
 ```
 
 ### Module Details
@@ -440,6 +460,22 @@ network
 - 2 PEs for queue storage (queue + blob subresources), reusing existing DNS zones
 - 4 RBAC assignments: AI Account identity, Project identity, and Weather Function identity get `Storage Queue Data Contributor`; AI Account gets `Storage Blob Data Contributor`
 - Foundry connection (`toolQueueStorage`) linking project to queue storage
+
+#### app-insights/
+- Log Analytics workspace (PerGB2018 SKU, 30-day retention)
+- Application Insights (workspace-based, web type)
+- Outputs: `connection_string`, `instrumentation_key`, `app_insights_id`, `app_insights_name`
+- Connection string passed to agent-webapp, weather-function, and datetime-mcp modules
+
+#### agent-webapp/
+- Container App on external CAE (agent-app-subnet) — internet-facing for M365
+- aiohttp web server + Microsoft Agents SDK v0.9.0
+- System-assigned managed identity for Foundry and weather function auth
+- 17+ env vars including SDK connection vars, AGENT_ID, App Insights
+- Secrets: acr-password, bot-app-secret, sdk-client-secret, appinsights-connection-string
+- Image: `agent-webapp:latest` from shared ACR
+- 1 CPU / 2Gi, 1–5 replicas, health probes on `/healthz`
+- Private DNS zone link for internal MCP CAE resolution
 
 ---
 
@@ -979,3 +1015,132 @@ az ad app delete --id <your-sp-client-id>
 15. **External CAE + VNet**: An external Container App Environment (internal_load_balancer_enabled=false) on a VNet subnet provides internet accessibility while maintaining VNet connectivity to internal resources
 16. **Bot Framework Activities**: M365 sends Activities to `/api/messages`. The agent processes them and replies via the Bot Connector REST API at the `serviceUrl` provided in the activity
 17. **Separate CAE for external access**: The MCP server's internal CAE must remain internal. Deploy the agent webapp on a separate external CAE on its own subnet (/23 for Container Apps)
+18. **Foundry RBAC — Azure AI Developer is NOT enough**: The `Azure AI Developer` role only covers `OpenAI/*`, `SpeechServices/*`, `ContentSafety/*`, `MaaS/*` data actions. It does NOT include `AIServices/agents/*`. Use `Cognitive Services User` (wildcard `Microsoft.CognitiveServices/*`) for Foundry Agents API access.
+19. **Project-scoped roles required for Foundry Agents API**: Account-level roles are insufficient. You must assign `Cognitive Services User` and `Azure AI Developer` at the **project** scope (`Microsoft.CognitiveServices/accounts/<name>/projects/<name>`) for Foundry Agents API operations.
+20. **EasyAuth allowedApplications must include managed identity appId**: When a Container App's managed identity calls a Function protected by EasyAuth, the MI's **Application (client) ID** (not its principal/object ID) must be listed in `allowedApplications` in the EasyAuth v2 validation config. Get it via `az ad sp show --id <principalId> --query appId`.
+21. **Microsoft Agents SDK env vars are required at startup**: The SDK reads `CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID`, `CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET`, `CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID`, `CONNECTIONSMAP__0__SERVICEURL=*`, `CONNECTIONSMAP__0__CONNECTION=SERVICE_CONNECTION`, and `AUTH_HANDLER_NAME=AGENTIC` from environment. Missing any causes `ValueError` at boot.
+22. **AGENT_ID env var overrides config.py default**: Even if set to empty string `""`, an env var takes precedence over hardcoded defaults in config.py. Terraform `default = ""` will override `os.getenv("AGENT_ID", "asst_xxx")` with empty string — always set the actual value in tfvars.
+23. **Local Docker builds preferred over ACR build**: `az acr build` can fail with `charmap` encoding errors on Windows. Use local `docker build` + `docker push` instead.
+24. **App Insights instrumentation**: Use `azure-monitor-opentelemetry` with `configure_azure_monitor()` called **before** other imports. Set `logger_name` per service. Add OpenTelemetry spans via `tracer.start_as_current_span()` for tool calls.
+
+---
+
+## Step 8b: Configure EasyAuth for Managed Identity Access
+
+After deploying the Agent Webapp (which has a system-assigned managed identity), you must add its application ID to the Weather Function's EasyAuth `allowedApplications` so it can call the function with a bearer token.
+
+### Get the Managed Identity Application ID
+
+```powershell
+# Get the Container App managed identity principal ID
+$principalId = az containerapp show --name <agent-app-name> `
+    --resource-group rg-hybrid-agent --query "identity.principalId" -o tsv
+
+# Get the application (client) ID from the service principal
+$miAppId = az ad sp show --id $principalId --query appId -o tsv
+Write-Host "Managed Identity App ID: $miAppId"
+```
+
+### Update EasyAuth Allowed Applications
+
+Create `easyauth-fix.json`:
+
+```json
+{
+  "properties": {
+    "globalValidation": {
+      "requireAuthentication": true,
+      "unauthenticatedClientAction": "Return401"
+    },
+    "identityProviders": {
+      "azureActiveDirectory": {
+        "enabled": true,
+        "registration": {
+          "clientId": "<weather-easyauth-client-id>",
+          "clientSecretSettingName": "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET",
+          "openIdIssuer": "https://sts.windows.net/<tenant-id>/v2.0"
+        },
+        "validation": {
+          "defaultAuthorizationPolicy": {
+            "allowedApplications": [
+              "<weather-easyauth-client-id>",
+              "<managed-identity-app-id>"
+            ]
+          }
+        }
+      }
+    },
+    "platform": { "enabled": true }
+  }
+}
+```
+
+```powershell
+az rest --method put `
+    --url "/subscriptions/<sub-id>/resourceGroups/rg-hybrid-agent/providers/Microsoft.Web/sites/<func-name>/config/authsettingsV2?api-version=2022-03-01" `
+    --body "@easyauth-fix.json"
+```
+
+> **Critical**: Use `PUT` not `PATCH` — the authsettingsV2 endpoint does not support PATCH. Include the **full** config in the body or the PUT will reset missing fields.
+
+---
+
+## Step 12: Application Insights & Observability
+
+All three services are instrumented with Azure Monitor OpenTelemetry:
+
+### Terraform Module (app-insights/)
+
+Creates a Log Analytics workspace and Application Insights resource. Passes the connection string to agent-webapp, weather-function, and datetime-mcp modules via the `appinsights_connection_string` variable.
+
+### Agent Webapp Instrumentation
+
+```python
+# In app.py — BEFORE other imports
+from azure.monitor.opentelemetry import configure_azure_monitor
+configure_azure_monitor(
+    connection_string=os.environ["APPLICATIONINSIGHTS_CONNECTION_STRING"],
+    logger_name="agent-webapp",
+    enable_live_metrics=True,
+)
+```
+
+Tool calls in `tools.py` are wrapped with OpenTelemetry spans:
+
+```python
+from opentelemetry import trace
+tracer = trace.get_tracer("agent-webapp.tools")
+
+with tracer.start_as_current_span("call_weather") as span:
+    span.set_attribute("http.url", url)
+    # ... make request ...
+    span.set_attribute("http.status_code", resp.status_code)
+```
+
+### Weather Function & MCP Server Instrumentation
+
+Both use `configure_azure_monitor()` with their respective `logger_name`:
+- Weather Function: `logger_name="weather-function"` in `function_app.py`
+- MCP Server: `logger_name="datetime-mcp"` in `server.py`
+
+### Viewing Telemetry
+
+Navigate to Azure Portal → Application Insights (`hybrid-agent-<suffix>-appinsights`) → **Live Metrics** for real-time, or **Transaction Search** for request traces across all three services.
+
+---
+
+## RBAC Summary for Agent Webapp Managed Identity
+
+The agent webapp's system-assigned managed identity needs these roles:
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| Cognitive Services OpenAI User | AI Services account | OpenAI model access |
+| Azure AI Developer | AI Services account | Foundry development actions |
+| Cognitive Services User | AI Services account | Wildcard CognitiveServices access |
+| Cognitive Services User | Foundry project | Agents API data-plane access |
+| Azure AI Developer | Foundry project | Agents API project operations |
+
+Plus the Weather Function EasyAuth `allowedApplications` must include the MI's appId.
+
+All five role assignments are defined in `main.tf` as `azurerm_role_assignment` resources.

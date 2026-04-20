@@ -2,6 +2,16 @@
 # Outputs
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── Application Insights ────────────────────────────────────────────────────
+output "appinsights_name" {
+  value = module.app_insights.app_insights_name
+}
+
+output "appinsights_connection_string" {
+  value     = module.app_insights.connection_string
+  sensitive = true
+}
+
 output "ai_account_name" {
   value = module.ai_account.account_name
 }

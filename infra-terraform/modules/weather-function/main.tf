@@ -56,6 +56,13 @@ variable "blob_dns_zone_name" {
   description = "Name of the blob DNS zone from private-endpoints module"
 }
 
+variable "appinsights_connection_string" {
+  type        = string
+  description = "Application Insights connection string for telemetry"
+  default     = ""
+  sensitive   = true
+}
+
 # ─── Storage Account (for Functions runtime) ────────────────────────────────
 resource "azurerm_storage_account" "func" {
   name                            = "${substr(var.base_name, 0, min(length(var.base_name), 20))}stor"
@@ -64,7 +71,7 @@ resource "azurerm_storage_account" "func" {
   account_tier                    = "Standard"
   account_replication_type        = "LRS"
   https_traffic_only_enabled      = true
-  public_network_access_enabled   = true
+  public_network_access_enabled   = false
   allow_nested_items_to_be_public = false
   shared_access_key_enabled       = false
 }
@@ -193,14 +200,27 @@ resource "azapi_resource" "func_app" {
           {
             name  = "FUNCTIONS_EXTENSION_VERSION"
             value = "~4"
+          },
+          {
+            name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+            value = var.appinsights_connection_string
           }
         ]
       }
-      publicNetworkAccess = "Enabled"
+      publicNetworkAccess = "Disabled"
+      virtualNetworkSubnetId = var.integration_subnet_id
+      vnetContentShareEnabled = true
+      vnetRouteAllEnabled     = true
     }
   }
 
   response_export_values = ["properties.defaultHostName", "identity.principalId"]
+
+  depends_on = [
+    azurerm_private_endpoint.func_blob,
+    azurerm_private_endpoint.func_queue,
+    azurerm_private_endpoint.func_file,
+  ]
 }
 
 data "azurerm_subscription" "current" {}
